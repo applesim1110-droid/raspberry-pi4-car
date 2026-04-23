@@ -1,0 +1,14 @@
+0 Arrow
+1 Line
+2 Hand
+3 Warning
+4 Qr
+5 Fingerprint
+6 Trapezium
+7 Diamond
+8 Segment
+9 3/4 Circle
+10 Star
+11 Recycle
+12 Cross
+13 Octagon
