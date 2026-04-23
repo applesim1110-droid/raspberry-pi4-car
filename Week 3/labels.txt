@@ -1,0 +1,7 @@
+0 Arrow
+1 Line
+2 Hand
+3 Warning
+4 Qr
+5 Fingerprint
+6 Recycle
