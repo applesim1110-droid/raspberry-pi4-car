@@ -99,6 +99,7 @@ def ai_thread_func():
             t_start = time.time()
             
             frame_copy = latest_frame.copy()
+            # Prevents "Data Tearing": stops Main Loop from overwriting pixels while AI is still reading.
             new_lbl = get_ai_label(frame_copy)
             
             with label_lock:

@@ -92,6 +92,7 @@ def ai_thread_func():
         if latest_frame is not None:
             # 1. Start timer for the MODEL WORK only
             frame_copy = latest_frame.copy()
+            # Prevents "Data Tearing": stops Main Loop from overwriting pixels while AI is still reading.
             new_lbl = get_ai_label(frame_copy)
             
             with label_lock:
