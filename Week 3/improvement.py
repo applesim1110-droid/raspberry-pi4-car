@@ -85,18 +85,47 @@ def get_ai_label(frame):
         return clean_label if conf > 0.55 else "Line"
     except Exception as e:
         return "Line"
-
+ai_fps = 0.0      # Stores the smoothed numerical FPS
 def ai_thread_func():
-    """Background AI thread using 4 CPU cores."""
-    global latest_label,latest_frame
+    global latest_label, latest_frame, ai_fps
+    
+    counter = 0
+    batch_size = 10
+    total_inference_time = 0  # We only sum the actual "work" time
+
     while True:
         if latest_frame is not None:
-            frame_copy=latest_frame.copy()
+            # 1. Start timer for the MODEL WORK only
+            t_start = time.time()
+            
+            frame_copy = latest_frame.copy()
             new_lbl = get_ai_label(frame_copy)
+            
             with label_lock:
                 latest_label = new_lbl
-        time.sleep(0.05) # Let the motors have CPU power!
+            
+            # 2. End timer for the MODEL WORK
+            t_end = time.time()
+            
+            # Add this specific inference time to our batch sum
+            total_inference_time += (t_end - t_start)
+            counter += 1
+            
+            # 3. Every 10 frames, calculate the "Potential FPS"
+            if counter >= batch_size:
+                # Average time per frame (Work only)
+                avg_work_time = total_inference_time / batch_size
+                # Potential FPS = 1 / (Work Time)
+                ai_fps = 1.0 / avg_work_time if avg_work_time > 0 else 0
+                
+              # print(f"[AI MODEL FPS]: {ai_fps:.2f} | Label: {latest_label} ")
+                
+                # Reset batch
+                counter = 0
+                total_inference_time = 0
 
+        # --- KEEP YOUR ORIGINAL SLEEP UNTOUCHED ---
+        time.sleep(0.05)
 def get_priority_mask(roi):
     """Detects Red, Yellow, or Black (with Sticky memory)."""
     global last_seen_color
@@ -414,7 +443,11 @@ def get_symbol_bbox(frame):
 picam2 = Picamera2()
 picam2.configure(picam2.create_video_configuration(main={"size": (320, 240)}))
 picam2.start()
-linethreshold = 90
+
+frame = picam2.capture_array()
+ret, _ = cv2.threshold(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), 90, 255, cv2.THRESH_BINARY_INV)
+linethreshold = ret
+print(f"Calibration complete. Threshold: {linethreshold}")
 
 # --- FLOATING POINT TFLITE MODEL LOADED HERE ---
 #Creates a TensorFlow Lite interpreter object
@@ -428,7 +461,10 @@ with open("labels.txt", "r") as f:
 
 threading.Thread(target=ai_thread_func, daemon=True).start()
 frame_count = 0
-
+main_fps = 0
+main_counter = 0
+main_batch = 10 # Main loop is fast, so we average 10 frames for stability
+main_start_time = time.time()
 try:
     while True:
         frame_count += 1
@@ -436,7 +472,11 @@ try:
         if frame is None: continue
         latest_frame=frame
         frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        bbox = get_symbol_bbox(frame_bgr)
+        # Only look for symbols every 3 frames to save CPU
+        if frame_count % 3 == 0:
+            bbox = get_symbol_bbox(frame_bgr)
+        else:
+            bbox = None # Reuse old bbox or skip
         
         with label_lock:
             label = latest_label
@@ -454,9 +494,9 @@ try:
         cv2.putText(display_frame, display_status, (10, 60),cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,0), 2)
         cv2.putText(display_frame, f"Action: {display_action}", (10, 90),cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0), 2)
         if lbl_lower != "line":
-            if bbox is not None:
-                x, y, w, h = bbox
-                cv2.rectangle(display_frame, (x, y), (x+w, y+h), (0, 255, 255), 2)
+           if bbox is not None:
+               x, y, w, h = bbox
+               cv2.rectangle(display_frame, (x, y), (x+w, y+h), (0, 255, 255), 2)
        
         if "arrow" in lbl_lower:
                 ignore_color=True
@@ -526,7 +566,20 @@ try:
                 # 'continue' instantly throws the code back to the very top of the 
                 # while True loop, which instantly triggers your Arrow Arc Turn code!
                 continue
-
+            
+        # --- CALCULATE MAIN FPS ---
+        main_counter += 1
+        if main_counter >= main_batch:
+            duration = time.time() - main_start_time
+            main_fps = main_batch / duration
+            
+            # Print both to Terminal for comparison
+            # \033[K clears the rest of the line to prevent ghost text
+            print(f"[Main PID]: {main_fps:.2f} FPS | [AI Thread]: {ai_fps:.2f} FPS")
+            
+            # Reset
+            main_counter = 0
+            main_start_time = time.time()
         # Catch-all to update window if AI triggered
         cv2.imshow("RobotView", display_frame)
             
